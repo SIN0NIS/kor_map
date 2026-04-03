@@ -1,29 +1,96 @@
 <!DOCTYPE html>
-<html>
+<html lang="ko">
 <head>
-    <title>나의 대한민국 지도</title>
-    <meta charset="utf-8">
+    <meta charset="UTF-8">
+    <title>대한민국 고도 및 시설물 시각화</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <style>
-        #map { height: 600px; width: 100%; }
+        body { margin: 0; display: flex; flex-direction: column; height: 100vh; }
+        #control-box { padding: 15px; background: #333; color: white; display: flex; gap: 15px; align-items: center; }
+        #map { flex-grow: 1; width: 100%; }
+        .info-panel { position: absolute; top: 80px; right: 20px; z-index: 1000; background: white; padding: 10px; border-radius: 5px; box-shadow: 0 0 10px rgba(0,0,0,0.2); }
+        select, button { padding: 8px; cursor: pointer; }
     </style>
 </head>
 <body>
-    <h2>나의 대한민국 지도 프로젝트</h2>
+
+    <div id="control-box">
+        <strong>🗺️ 레이어 선택:</strong>
+        <select id="layer-select">
+            <option value="Base">기본 지도 (2D)</option>
+            <option value="Satellite">위성 지도</option>
+            <option value="Hybrid">하이브리드 (위성+도로)</option>
+        </select>
+        <span>| 지도를 클릭하면 해당 지점의 <b>고도(높이)</b>를 확인합니다.</span>
+    </div>
+
     <div id="map"></div>
+    <div class="info-panel" id="elevation-info">클릭한 지점의 고도: - m</div>
 
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script>
-        // 한국 중심 좌표로 지도 설정 (위도 36.5, 경도 127.5)
-        var map = L.map('map').setView([36.5, 127.5], 7);
+        // ---------------------------------------------------
+        // 1. 설정 (발급받은 API 키를 여기에 입력하세요)
+        // ---------------------------------------------------
+        const VWORLD_KEY = '4672F099-B1DB-3541-A647-092BB3065A72'; 
 
-        // 오픈스트리트맵 타일(지도 이미지) 추가
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+        // 2. 지도 초기화 (서울 중심)
+        const map = L.map('map').setView([37.5665, 126.9780], 13);
 
-        // 서울 시청에 마커 하나 찍어보기
-        L.marker([37.5665, 126.9780]).addTo(map)
-            .bindPopup('서울 시청입니다.')
-            .openPopup();
+        // 3. 브이월드 배경지도 레이어 함수
+        function getVWorldLayer(type) {
+            return L.tileLayer(`https://api.vworld.kr/req/wmts/1.0.0/${VWORLD_KEY}/${type}/{z}/{y}/{x}.png`, {
+                attribution: '&copy; VWorld (국토교통부)'
+            });
+        }
+
+        let currentLayer = getVWorldLayer('Base').addTo(map);
+
+        // 4. 레이어 전환 이벤트
+        document.getElementById('layer-select').addEventListener('change', function(e) {
+            map.removeLayer(currentLayer);
+            currentLayer = getVWorldLayer(e.target.value).addTo(map);
+        });
+
+        // ---------------------------------------------------
+        // 5. 핵심: 클릭 시 고도(DEM) 데이터 가져오기 (API 활용)
+        // ---------------------------------------------------
+        map.on('click', function(e) {
+            const lat = e.latlng.lat;
+            const lng = e.latlng.lng;
+
+            // 브이월드 데이터 API (고도 검색용 서비스 호출)
+            // 실제 운영 시에는 'Data API 2.0'의 고도 API 규격을 확인하여 URL을 구성합니다.
+            // 아래는 개념적인 Fetch 예시입니다.
+            const apiUrl = `https://api.vworld.kr/req/data?service=data&request=GetFeature&data=LT_C_DEM&key=${VWORLD_KEY}&geomFilter=POINT(${lng} ${lat})&geometry=false`;
+
+            fetch(apiUrl)
+                .then(res => res.json())
+                .then(data => {
+                    // API 응답 구조에 따라 고도값을 추출 (예: data.response.result.feature.properties.val)
+                    // 브이월드 API 사양에 따라 필드명은 다를 수 있습니다.
+                    console.log("API 응답 데이터:", data);
+                    
+                    // 데모용 가상 로직 (실제 연결 시 위 필드명을 맞춰야 함)
+                    let elevation = "데이터 확인 중..."; 
+                    if(data.response && data.response.status === "OK") {
+                        // 실제 데이터 필드에서 값을 추출해 보여줌
+                        elevation = data.response.result.items[0].elevation || "알 수 없음";
+                    }
+
+                    document.getElementById('elevation-info').innerHTML = 
+                        `위도: ${lat.toFixed(4)}<br>경도: ${lng.toFixed(4)}<br><b>고도: ${elevation} m</b>`;
+                    
+                    L.popup()
+                        .setLatLng(e.latlng)
+                        .setContent(`현재 위치 고도: ${elevation}m`)
+                        .openOn(map);
+                })
+                .catch(err => {
+                    console.error("데이터를 가져오는데 실패했습니다.", err);
+                    alert("API 키가 올바르지 않거나 호출 한도를 초과했을 수 있습니다.");
+                });
+        });
     </script>
 </body>
 </html>
