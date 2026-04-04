@@ -2,134 +2,127 @@
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
-    <title>대한민국 지형 고저 및 등고선 컨트롤러</title>
+    <title>KOR Elevation Map & Extractor</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <style>
-        body { margin: 0; display: flex; flex-direction: column; height: 100vh; font-family: sans-serif; }
-        #control-box { padding: 15px; background: #222; color: white; display: flex; gap: 20px; align-items: center; z-index: 2000; box-shadow: 0 2px 5px rgba(0,0,0,0.3); }
-        #map { flex-grow: 1; width: 100%; background: #f0f0f0; }
-        
-        /* 고도 범례 (Elevation Bar) */
-        .legend {
-            position: absolute; top: 80px; right: 20px; z-index: 1000;
-            background: white; padding: 10px; border-radius: 5px;
-            box-shadow: 0 0 15px rgba(0,0,0,0.2); line-height: 1.5;
-        }
-        .legend-bar {
-            width: 20px; height: 150px;
-            background: linear-gradient(to top, #00ff00 0%, #ffff00 50%, #ff0000 100%);
-            margin-right: 10px; border: 1px solid #ccc;
-        }
-        .legend-container { display: flex; align-items: center; }
-
-        select, input { padding: 5px; border-radius: 4px; border: none; }
-        .opt-group { display: flex; align-items: center; gap: 8px; }
+        body { margin: 0; padding: 20px; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #f0f2f5; }
+        #control-panel { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); margin-bottom: 20px; }
+        #map { width: 100%; height: 600px; border-radius: 8px; border: 2px solid #ccc; }
+        .btn { padding: 10px 20px; cursor: pointer; border: none; border-radius: 4px; font-weight: bold; transition: 0.3s; }
+        .btn-extract { background: #28a745; color: white; }
+        .btn-extract:hover { background: #218838; }
+        #log { background: #1e1e1e; color: #00ff00; height: 120px; overflow-y: auto; padding: 10px; margin-top: 15px; font-family: monospace; font-size: 12px; border-radius: 4px; }
+        #json-output { width: 100%; height: 150px; margin-top: 15px; display: none; font-family: monospace; }
+        .setting-group { margin-bottom: 10px; display: inline-block; margin-right: 20px; }
     </style>
 </head>
 <body>
 
-    <div id="control-box">
-        <div class="opt-group">
-            <strong>🗺️ 배경:</strong>
-            <select id="layer-select">
-                <option value="white">백지도 (권장)</option>
-                <option value="Base">일반 지도</option>
-            </select>
-        </div>
-
-        <div class="opt-group">
-            <strong>⛰️ 등고선 간격:</strong>
-            <select id="contour-interval">
-                <option value="10">10m 단위 (정밀)</option>
-                <option value="20">20m 단위</option>
-                <option value="50" selected>50m 단위 (보통)</option>
-                <option value="100">100m 단위 (광역)</option>
-            </select>
-        </div>
-
-        <div style="font-size: 0.85em; color: #aaa;">* 클릭 시 해당 지점 높이 출력</div>
+<div id="control-panel">
+    <h2>⛰️ V-World 지형 데이터 통합 도구</h2>
+    
+    <div class="setting-group">
+        <label><b>격자 간격:</b></label>
+        <select id="grid-step">
+            <option value="0.009">1km (광역)</option>
+            <option value="0.0009" selected>100m (보통)</option>
+            <option value="0.00045">50m (정밀)</option>
+            <option value="0.000045">5m (초정밀)</option>
+        </select>
     </div>
 
-    <div id="map"></div>
-
-    <div class="legend">
-        <strong>고도 (Elevation)</strong>
-        <div class="legend-container">
-            <div class="legend-bar"></div>
-            <div>
-                <div>1,500m</div>
-                <div style="margin-top: 45px;">750m</div>
-                <div style="margin-top: 45px;">0m</div>
-            </div>
-        </div>
+    <div class="setting-group">
+        <label><b>수집 구역:</b></label>
+        <input type="text" id="area-name" value="서울 시청 인근" style="width: 100px;">
     </div>
 
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-    <script>
-        const VWORLD_KEY = '4672F099-B1DB-3541-A647-092BB3065A72'; 
+    <button class="btn btn-extract" onclick="runExtraction()">🚀 데이터 추출 시작</button>
+    <button class="btn" style="background: #007bff; color: white;" onclick="loadLocalJSON()">📂 기존 데이터 불러오기</button>
 
-        // 지도 초기화
-        const map = L.map('map').setView([36.5, 127.5], 8);
+    <div id="log">준비 완료. "추출 시작"을 누르면 현재 설정된 범위의 고도 데이터를 수집합니다.</div>
+    <textarea id="json-output" placeholder="추출이 완료되면 JSON 데이터가 여기에 나타납니다."></textarea>
+</div>
 
-        // 배경 레이어 설정
-        function getVWorldLayer(type) {
-            return L.tileLayer(`https://api.vworld.kr/req/wmts/1.0.0/${VWORLD_KEY}/${type}/{z}/{y}/{x}.png`, {
-                attribution: '&copy; VWorld'
-            });
+<div id="map"></div>
+
+<script>
+    // 1. 초기 설정
+    const apiKey = "4672F099-B1DB-3541-A647-092BB3065A72";
+    let map = L.map('map').setView([37.5665, 126.9780], 13); // 서울 시청 기준
+    let gridLayer = L.layerGroup().addTo(map);
+
+    // 2. 브이월드 배경지도 레이어 추가
+    L.tileLayer(`https://api.vworld.kr/req/wmts/1.0.0/${apiKey}/Base/{z}/{y}/{x}.png`, {
+        maxZoom: 19,
+        attribution: '© V-World'
+    }).addTo(map);
+
+    // 3. 데이터 추출 함수
+    async function runExtraction() {
+        const step = parseFloat(document.getElementById('grid-step').value);
+        const log = document.getElementById('log');
+        const output = document.getElementById('json-output');
+        const results = [];
+
+        // 현재 지도의 보고 있는 영역(Bounds) 가져오기
+        const bounds = map.getBounds();
+        const s = bounds.getSouth(), n = bounds.getNorth();
+        const w = bounds.getWest(), e = bounds.getEast();
+
+        log.innerHTML = "📡 데이터 수집을 시작합니다... (브라우저 인증 사용)<br>";
+        gridLayer.clearLayers(); // 기존 격자 지우기
+
+        for (let lat = s; lat <= n; lat += step) {
+            for (let lon = w; lon <= e; lon += step) {
+                const url = `https://api.vworld.kr/req/data?service=data&request=GetFeature&data=LT_C_DEM&key=${apiKey}&geomFilter=POINT(${lon} ${lat})`;
+                
+                try {
+                    const res = await fetch(url);
+                    const data = await res.json();
+                    
+                    if (data.response.status === "OK") {
+                        const val = data.response.result.featureCollection.features.properties.val;
+                        const height = parseFloat(val);
+                        
+                        results.push({ lat: lat.toFixed(5), lng: lon.toFixed(5), el: height });
+                        
+                        // 지도에 즉시 표시 (시각화)
+                        const color = height > 500 ? '#ff0000' : height > 100 ? '#ffa500' : '#00ff00';
+                        L.circleMarker([lat, lon], { radius: 3, color: color, fillOpacity: 0.7 }).addTo(gridLayer);
+                        
+                        log.innerHTML += `OK: ${height}m.. `;
+                    }
+                } catch (err) {
+                    log.innerHTML += `<span style="color:red">Fail.. </span>`;
+                }
+                log.scrollTop = log.scrollHeight;
+                await new Promise(r => setTimeout(r, 100)); // 0.1초 간격
+            }
+            log.innerHTML += "<br>";
         }
 
-        let currentBaseLayer = getVWorldLayer('white').addTo(map);
+        log.innerHTML += "<br><b>✅ 완료! 아래 JSON을 복사해서 grid_data.json으로 저장하세요.</b>";
+        output.style.display = "block";
+        output.value = JSON.stringify(results, null, 2);
+    }
 
-        // 등고선 레이어 (WMS)
-        // 브이월드 등고선 레이어(LT_L_AS001)는 서버에서 그려서 내려주므로 
-        // 클라이언트에서 0~100m만 보여줘! 식의 필터링은 스타일 파라미터(SLD) 수정이 필요합니다.
-        // 여기서는 기본 등고선 레이어를 활용합니다.
-        let contourLayer = L.tileLayer.wms('https://api.vworld.kr/req/wms', {
-            layers: 'LT_L_AS001',
-            format: 'image/png',
-            transparent: true,
-            key: VWORLD_KEY,
-            opacity: 0.7
-        }).addTo(map);
-
-        // 배경 전환
-        document.getElementById('layer-select').addEventListener('change', function(e) {
-            map.removeLayer(currentBaseLayer);
-            currentBaseLayer = getVWorldLayer(e.target.value).addTo(map);
-            contourLayer.bringToFront();
-        });
-
-        // 등고선 설정 변경 (개념적 구현)
-        // 브이월드 표준 WMS는 파라미터로 간격을 조정하기 어렵기 때문에, 
-        // 실제로는 줌 레벨에 따라 다르게 보이거나 투명도를 조절하는 방식을 많이 씁니다.
-        document.getElementById('contour-interval').addEventListener('change', function(e) {
-            const interval = e.target.value;
-            alert(`${interval}m 단위 등고선 최적화 모드로 전환합니다.\n(줌 레벨을 조절하여 확인하세요)`);
-            
-            // 팁: 특정 간격만 보고 싶다면 SLD(Styled Layer Descriptor)를 작성해 넘겨야 합니다.
-            // 여기서는 레이어를 새로고침하여 로드하는 방식으로 처리합니다.
-            map.removeLayer(contourLayer);
-            contourLayer.addTo(map);
-        });
-
-        // 클릭 시 고도 측정
-        map.on('click', function(e) {
-            const lat = e.latlng.lat;
-            const lng = e.latlng.lng;
-            
-            fetch(`https://api.vworld.kr/req/address?service=address&request=getcoord&key=${VWORLD_KEY}&location=${lng},${lat}&type=parcel&ele=true`)
-                .then(res => res.json())
-                .then(data => {
-                    let elevation = (data.response && data.response.status === "OK") 
-                                    ? data.response.result.elevation 
-                                    : "측정 불가";
-
-                    L.popup()
-                        .setLatLng(e.latlng)
-                        .setContent(`<b>고도: ${elevation}m</b><br><span style="font-size:11px;">(해수면 기준)</span>`)
-                        .openOn(map);
+    // 4. 저장된 JSON 파일 불러오기 함수 (나중에 파일 업로드 후 사용)
+    function loadLocalJSON() {
+        fetch('grid_data.json')
+            .then(res => res.json())
+            .then(data => {
+                gridLayer.clearLayers();
+                data.forEach(p => {
+                    const color = p.el > 500 ? 'red' : 'green';
+                    L.circleMarker([p.lat, p.lng], { radius: 2, color: color }).addTo(gridLayer)
+                     .bindPopup(`고도: ${p.el}m`);
                 });
-        });
-    </script>
+                alert("데이터 로드 완료!");
+            })
+            .catch(err => alert("저장된 grid_data.json 파일을 찾을 수 없습니다. 먼저 추출해서 서버에 올려주세요."));
+    }
+</script>
+
 </body>
 </html>
